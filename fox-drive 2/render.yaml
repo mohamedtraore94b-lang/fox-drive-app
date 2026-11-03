@@ -10,6 +10,7 @@ services:
     name: fox-drive
     runtime: docker
     plan: starter
+    rootDir: "fox-drive 2"
     region: frankfurt
     healthCheckPath: /healthz
     envVars:
