@@ -1,0 +1,23 @@
+# Blueprint Render : crée le serveur et sa base Postgres en un clic (Render → New → Blueprint).
+databases:
+  - name: fox-drive-db
+    plan: basic-256mb
+    region: frankfurt
+    databaseName: foxdrive
+
+services:
+  - type: web
+    name: fox-drive
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: fox-drive-db
+          property: connectionString
+      - key: APP_SECRET
+        generateValue: true
+      - key: SETUP_CODE
+        sync: false

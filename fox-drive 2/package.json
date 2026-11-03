@@ -1,0 +1,20 @@
+{
+  "name": "fox-drive",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fox Drive — suivi de flotte (site + API + Postgres), un seul serveur Node",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "start": "node server/main.ts",
+    "test": "vitest run",
+    "dev": "node scripts/dev-server.ts"
+  },
+  "dependencies": {
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@netlify/database-dev": "latest",
+    "vitest": "^2.1.0"
+  }
+}
