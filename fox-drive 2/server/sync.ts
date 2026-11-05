@@ -95,7 +95,11 @@ export async function runFoxSync(opts: { force?: boolean; origin?: "auto" | "man
     const res = L.reconcileFox(S, parsed);
     const changes = foxChangeCount(res);
     const active = S.drivers.filter(L.isActive).length;
-    if (!changes) return { kind: "nochange" as const, res };
+    if (!changes) {
+      // seules les agences ont changé : mise à jour silencieuse, rien à valider
+      if (res.agencyUpdates.length) { L.applyFox(S, res, label + " — agences"); return { kind: "nochange" as const, res }; }
+      return { kind: "nochange" as const, res };
+    }
     const safety = foxIsSafe(res, active);
     const mayAuto = automation.autoApplySync && safety.safe;
     if (mayAuto) {
