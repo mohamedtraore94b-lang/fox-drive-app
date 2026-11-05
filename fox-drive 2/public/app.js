@@ -25,7 +25,7 @@ const API = {
 let S = null;           // vue de l'état serveur : drivers, contacts, log, imports, pending, config
 let ME = null;          // utilisateur connecté
 let sigPrev = "";
-const ui = { view: "dash", q: "", filter: "all", agencies: loadAgencies(), sort: "due", sel: false, ids: new Set(), vq: "", logFilter: "all", bulk: null, rev: null, folders: [], firstDash: true, busy: 0, chat: [], settings: null, campaigns: null, replies: null };
+const ui = { view: "dash", q: "", filter: "all", agencies: loadAgencies(), report: null, reportHours: 24, sort: "due", sel: false, ids: new Set(), vq: "", logFilter: "all", bulk: null, rev: null, folders: [], firstDash: true, busy: 0, chat: [], settings: null, campaigns: null, replies: null };
 const isAdmin = () => !ME || ME.role === "admin";
 const actives = () => S.drivers.filter(isActive);
 const byId = id => S.drivers.find(d => d.id === Number(id));
@@ -160,6 +160,7 @@ const VIEWS = [
   { key: "vehicles", label: "Véhicules", icon: "car" },
   { key: "sync", label: "Mise à jour", short: "Synchro", icon: "sync" },
   { key: "campaigns", label: "Campagnes", short: "Envois", icon: "mega", tab: true },
+  { key: "report", label: "Rapport", short: "Rapport", icon: "log" },
   { key: "agent", label: "Assistant", icon: "chat", tab: true },
   { key: "log", label: "Journal", icon: "log" },
   { key: "settings", label: "Réglages", icon: "gear", hideTop: true },
@@ -191,6 +192,7 @@ function go(view, opts) {
   try { history.replaceState(null, "", "#" + view); } catch (e) { }
   renderAll();
   if (view === "campaigns") loadCampaigns();
+  if (view === "report") loadReport();
   if (view === "settings") loadSettings();
 }
 function renderAll() {
@@ -203,6 +205,7 @@ function renderAll() {
   if (ui.view === "sync") renderSync();
   if (ui.view === "log") renderLog();
   if (ui.view === "campaigns") renderCampaigns();
+  if (ui.view === "report") renderReport();
   if (ui.view === "agent") renderAgent();
   if (ui.view === "settings") renderSettings();
   updateBulkbar();
@@ -827,6 +830,59 @@ const CAMP_STATUS = { draft: ["amber", "Brouillon"], sending: ["blue", "Envoi en
 const ITEM_STATUS = { pending: ["", "À envoyer"], sent: ["green", "Envoyé"], failed: ["red", "Échec"], skipped: ["", "Retiré"] };
 const typeLabel = k => ((MESSAGE_TYPES.find(t => t.key === k) || {}).label || k).replace(/ \(.*\)/, "");
 
+/* =========================================================
+   COMPTE RENDU : qui a envoyé, qui reste à relancer
+   ========================================================= */
+async function loadReport() {
+  try {
+    ui.report = await API.get("/report?hours=" + ui.reportHours);
+    if (ui.view === "report") renderReport();
+  } catch (e) { if (e.status !== 401) toast(e.message, true); }
+}
+function reportDetail(x) { return x.never ? "jamais vérifié" : x.lateDays > 0 ? "en retard de " + x.lateDays + " j" : "échéance aujourd'hui"; }
+function reportGroups(list) {
+  const g = {};
+  list.forEach(x => { (g[x.agency || ""] = g[x.agency || ""] || []).push(x); });
+  return Object.keys(g).sort((a, b) => (a === "") - (b === "") || a.localeCompare(b, "fr")).map(k => [k, g[k]]);
+}
+function reportName(x) { return '<button data-act="open" data-id="' + x.id + '" style="background:none;border:0;padding:0;font:inherit;font-weight:600;cursor:pointer;color:inherit;text-align:left">' + esc(x.name) + "</button>"; }
+function reportText() {
+  const R = ui.report && ui.report.report; if (!R) return "";
+  const day = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Paris" });
+  const L2 = [];
+  L2.push("Compte rendu FOX DRIVE · " + day + " (" + (R.hours === 24 ? "dernières 24 h" : R.hours + " h") + ")");
+  L2.push("");
+  L2.push("A envoyé (" + R.received.length + ") :");
+  if (!R.received.length) L2.push("- personne");
+  R.received.forEach(x => L2.push("- " + x.name + (x.agency ? " (" + agencyLabel(x.agency) + ")" : "") + " · " + x.via.join(" + ") + (x.toRegister ? " · à enregistrer" : "")));
+  L2.push("");
+  L2.push("Reste à relancer (" + R.toRelance.length + ") :");
+  reportGroups(R.toRelance).forEach(([a, l]) => { L2.push(agencyLabel(a) + " (" + l.length + ") : " + l.map(x => x.name + (x.never ? " [jamais vérifié]" : "")).join(", ")); });
+  if (R.waiting.length) { L2.push(""); L2.push("Déjà relancés, en attente (" + R.waiting.length + ") : " + R.waiting.map(x => x.name).join(", ")); }
+  if (R.noPhone.length) { L2.push(""); L2.push("Sans numéro (" + R.noPhone.length + ") : " + R.noPhone.map(x => x.name).join(", ")); }
+  return L2.join("\n");
+}
+function renderReport() {
+  const el = $("#v-report"); if (!el) return;
+  const P = ui.report, R = P && P.report;
+  const chips = [[24, "24 h"], [48, "48 h"], [168, "7 jours"]].map(([h, l]) => '<button class="chipbtn" aria-pressed="' + (ui.reportHours === h) + '" data-act="report-hours" data-h="' + h + '">' + l + "</button>").join("");
+  let h = '<div class="hero"><div><h1>Compte rendu</h1><div class="sub">Qui a envoyé sa vérification ou des photos, et qui reste à relancer.' + (R ? " Mis à jour " + relTime(R.generatedAt) + "." : "") + '</div></div><div class="hero-actions"><button class="btn" data-act="report-copy">Copier le texte</button></div></div>' +
+    '<div class="chips" style="margin-bottom:14px">' + chips + "</div>";
+  if (!R) { el.innerHTML = h + '<div class="empty">Chargement…</div>'; return; }
+  if (!waReady()) h += '<div class="banner"><div class="grow"><b>WhatsApp Business n\'est pas encore relié.</b> En attendant, « a envoyé » vient des vérifications enregistrées dans FoxDrive (lues dans la feuille). Les photos reçues sur WhatsApp s\'ajouteront dès que la connexion sera faite.</div></div>';
+  const c = R.counts;
+  h += '<div class="chips" style="margin-bottom:6px"><span class="chipbtn" aria-pressed="false">A envoyé <span class="n">' + c.received + '</span></span><span class="chipbtn" aria-pressed="false">À relancer <span class="n">' + c.toRelance + '</span></span><span class="chipbtn" aria-pressed="false">En attente de réponse <span class="n">' + c.waiting + '</span></span><span class="chipbtn" aria-pressed="false">Sans numéro <span class="n">' + c.noPhone + "</span></span></div>";
+  h += '<div class="section-h"><h2>A envoyé (' + R.received.length + ')</h2></div><div class="panel activity">' + (R.received.length ? R.received.map(x => '<div class="act-row"><span class="act-time">' + esc(logTimeShort(x.at)) + "</span><span>" + reportName(x) + ' <span class="muted">· ' + esc(x.plate) + (x.agency ? " · " + esc(agencyLabel(x.agency)) : "") + " · " + esc(x.via.join(" + ")) + "</span>" + (x.toRegister ? " " + badge("amber", "à enregistrer (✓)") : "") + "</span></div>").join("") : '<div class="empty">Personne n\'a rien envoyé sur cette période.</div>') + "</div>";
+  if ((R.unknownPhotos || []).length) h += '<div class="small muted" style="margin-top:6px">' + R.unknownPhotos.length + " photo(s) reçue(s) d'un numéro inconnu : " + R.unknownPhotos.map(u => esc(u.phone)).join(", ") + ".</div>";
+  if ((R.replies || []).length) h += '<div class="section-h"><h2>Ont répondu par message (' + R.replies.length + ')</h2></div><div class="panel activity">' + R.replies.map(x => '<div class="act-row"><span class="act-time">' + esc(logTimeShort(x.at)) + "</span><span>" + reportName(x) + ' <span class="muted">· ' + esc(x.text) + "</span></span></div>").join("") + "</div>";
+  const grp = (list, open) => reportGroups(list).map(([a, l]) => '<details class="panel" style="margin-bottom:8px"' + (open && l.length <= 15 ? " open" : "") + '><summary style="cursor:pointer;padding:12px 14px"><b>' + esc(agencyLabel(a)) + '</b> <span class="muted">· ' + l.length + '</span></summary><div class="activity">' + l.map(x => '<div class="act-row"><span class="act-time mono">' + esc(x.plate) + "</span><span>" + reportName(x) + ' <span class="muted">· ' + reportDetail(x) + "</span></span></div>").join("") + "</div></details>").join("");
+  h += '<div class="section-h"><h2>Reste à relancer (' + R.toRelance.length + ')</h2>' + (R.toRelance.length && isAdmin() ? '<button class="btn btn-sm btn-primary" data-act="report-relance">Préparer la relance</button>' : "") + "</div>" + (R.toRelance.length ? grp(R.toRelance, true) : '<div class="empty">Personne à relancer pour le moment.</div>');
+  if (R.waiting.length) h += '<div class="section-h"><h2>Déjà relancés, en attente (' + R.waiting.length + ')</h2></div>' + grp(R.waiting, false);
+  if (R.noPhone.length) h += '<div class="section-h"><h2>Sans numéro (' + R.noPhone.length + ')</h2></div>' + grp(R.noPhone, false);
+  const hist = (P.history || []);
+  if (hist.length) h += '<div class="section-h"><h2>Les jours précédents</h2></div><div class="panel activity">' + hist.map(x => '<div class="act-row"><span class="act-time">' + esc(fmtDate(parseISO(x.day))) + "</span><span>" + x.counts.received + " ont envoyé · " + x.counts.toRelance + " à relancer · " + x.counts.waiting + " en attente</span></div>").join("") + "</div>";
+  el.innerHTML = h;
+}
 async function loadCampaigns() {
   try {
     const [c, r] = await Promise.all([API.get("/campaigns"), API.get("/replies")]);
@@ -1181,6 +1237,9 @@ const ACT = {
   close: () => closeModal(),
   open: t => openDriver(Number(t.dataset.id), t.dataset.focus),
   filter: t => { ui.filter = t.dataset.f; renderDrivers(); },
+  "report-hours": t => { ui.reportHours = Number(t.dataset.h) || 24; loadReport(); },
+  "report-copy": () => { const v = reportText(); if (!v) return toast("Le compte rendu se charge…"); (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject()).then(() => toast("Compte rendu copié."), () => toast("Copie impossible : sélectionne le texte à la main.", true)); },
+  "report-relance": () => { const ids = ((ui.report && ui.report.report.toRelance) || []).map(x => x.id); if (!ids.length) return toast("Personne à relancer."); openChooser(null, ids); },
   agency: t => { const a = t.dataset.a; if (ui.agencies.has(a)) ui.agencies.delete(a); else ui.agencies.add(a); saveAgencies(); renderDrivers(); },
   "agency-all": () => { ui.agencies.clear(); saveAgencies(); renderDrivers(); },
   "log-filter": t => { ui.logFilter = t.dataset.f; renderLog(); },
@@ -1294,6 +1353,7 @@ async function start() {
   ui.firstDash = true;
   renderAll();
   if (ui.view === "campaigns") loadCampaigns(); else if (isAdmin()) loadCampaigns();
+  if (ui.view === "report") loadReport();
   if (ui.view === "settings") loadSettings();
   clearInterval(pollT);
   pollT = setInterval(poll, 60000);
