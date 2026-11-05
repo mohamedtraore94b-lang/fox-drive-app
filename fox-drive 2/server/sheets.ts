@@ -110,7 +110,7 @@ export async function fetchContactsFromSource(): Promise<{ entries: any[]; label
 }
 
 export function hashRows(rows: any[]): string {
-  const canon = rows.map((r) => [r.plate, r.name, r.vehicle, r.lastVerif || "", r.pickup || ""].join("|")).sort().join("\n");
+  const canon = rows.map((r) => [r.plate, r.name, r.vehicle, r.lastVerif || "", r.pickup || "", r.agency || ""].join("|")).sort().join("\n");
   return createHash("sha256").update(canon).digest("hex").slice(0, 24);
 }
 
