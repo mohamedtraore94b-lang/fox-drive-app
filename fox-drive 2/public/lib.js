@@ -126,8 +126,11 @@ function refDate(d) {
   return c.reduce((a, b) => (a > b ? a : b));
 }
 function dueDate(d) { const r = refDate(d); return r ? addDays(r, CYCLE_DAYS) : null; }
+/* jamais rien envoyé : ni vérification enregistrée, ni photos reçues -> toujours à relancer, même si la date d'échéance est loin */
+function neverSent(d) { return !d.lastVerif && !d.lastCheckin; }
 /* 'overdue' | 'soon' | 'ok' | 'unknown' */
 function dueStatus(d, now) {
+  if (neverSent(d)) return "overdue";
   const due = dueDate(d);
   if (!due) return "unknown";
   const diff = daysBetween(now || todayDate(), due);
@@ -303,6 +306,10 @@ function headerIndex(headers, names) {
   return -1;
 }
 
+/* agence : "  rungis " -> "RUNGIS" (un seul libellé par agence pour que le filtre ne se dédouble pas) */
+function cleanAgency(v) { return String(v == null ? "" : v).replace(/\s+/g, " ").trim().toUpperCase().slice(0, 40); }
+function agencyLabel(a) { const t = String(a || "").trim(); if (!t) return "Sans agence"; return t.length <= 3 ? t : t.charAt(0) + t.slice(1).toLowerCase(); }
+
 /* tableau (tableau de lignes) -> lignes FoxDrive, par noms de colonnes */
 function foxRowsFromGrid(grid) {
   if (!grid.length) throw new Error("Fichier vide.");
@@ -320,6 +327,7 @@ function foxRowsFromGrid(grid) {
   const iVerif = headerIndex(H, ["derniere verif", "derniere verification", "date verif", "verification"]);
   const iPick = headerIndex(H, ["date debut location", "debut de location", "debut location", "date de prise", "prise du vehicule", "date prise", "date de depart", "date depart", "depart", "date debut", "debut", "depuis", "start"]);
   const iKm = headerIndex(H, ["kilometrage", "km"]);
+  const iAgency = headerIndex(H, ["agence", "agency"]);
   if (iPlate < 0 || iName < 0) throw new Error("Colonnes introuvables : il faut au moins « Immatriculation » et « Chauffeur ».");
   const all = [];
   for (let r = hi + 1; r < grid.length; r++) {
@@ -331,7 +339,8 @@ function foxRowsFromGrid(grid) {
     all.push({
       plate, vehicle: iVeh >= 0 ? String(g[iVeh] || "").replace(/^—\s*/, "").trim() : "", name: String(g[iName] || "").trim(),
       lastVerif: iVerif >= 0 ? parseAnyDate(g[iVerif]) : null, pickup: iPick >= 0 ? parseAnyDate(g[iPick]) : null,
-      category: "", status, km: iKm >= 0 ? String(g[iKm] || "") : "", warning: ""
+      category: "", status, km: iKm >= 0 ? String(g[iKm] || "") : "", warning: "",
+      agency: iAgency >= 0 ? cleanAgency(g[iAgency]) : ""
     });
   }
   const res = finalizeFoxRows(all, "fichier tableur");
@@ -444,7 +453,7 @@ function reconcileFox(state, parsed, nowISO) {
   const drivers = state.drivers;
   const idx = buildNameIndex(drivers);
   const used = new Set();
-  const res = { total: parsed.rows.length, matched: [], probable: [], added: [], absent: [], keptVerif: [], warnings: [], unchanged: 0, returning: 0, truncated: false, ignored: parsed.ignored || {} };
+  const res = { total: parsed.rows.length, matched: [], probable: [], added: [], absent: [], keptVerif: [], agencyUpdates: [], warnings: [], unchanged: 0, returning: 0, truncated: false, ignored: parsed.ignored || {} };
   const seenPlate = new Map(), seenKeys = new Map();
 
   parsed.rows.forEach(row => {
@@ -459,6 +468,7 @@ function reconcileFox(state, parsed, nowISO) {
     if (!found) { res.added.push({ key: "add:" + row.plate, row, on: true, phone: contactPhoneFor(state, row.name) }); return; }
     const d = found.driver;
     used.add(d.id);
+    if (row.agency && found.how !== "probable" && d.agency !== row.agency) res.agencyUpdates.push({ driver: d, agency: row.agency });   // silencieux : pas un « changement » à valider
     const ch = {};
     const plateChanged = normPlate(d.plate) !== row.plate;
     if (plateChanged) ch.plate = [d.plate || "", row.plate];
@@ -523,6 +533,7 @@ function applyFox(state, res, sourceLabel) {
   const today = toISO(new Date());
   const sum = { added: 0, vehicle: 0, updated: 0, left: 0, returned: 0 };
   const accepted = new Set(res.probable.filter(p => p.on).map(p => p.key));
+  (res.agencyUpdates || []).forEach(u => { u.driver.agency = u.agency; });
 
   const applyEntry = (e) => {
     const d = e.driver, ch = e.changes;
@@ -551,7 +562,7 @@ function applyFox(state, res, sourceLabel) {
     const d = {
       id: nextId++, name: row.name, phone: a.phone || "", plate: row.plate, vehicle: row.vehicle || "", manager: "",
       pickup: row.pickup || today, pickupEstimated: !row.pickup, lastVerif: row.lastVerif || null, lastCheckin: null, lastContacted: null,
-      status: "active", absentSince: null, source: "foxdrive_" + today
+      status: "active", absentSince: null, source: "foxdrive_" + today, agency: row.agency || ""
     };
     state.drivers.push(d);
     sum.added++;
@@ -659,10 +670,11 @@ function normalizeDriver(o) {
     id: o.id, name: o.name || "", phone: o.phone || "", plate: normPlate(o.plate), vehicle: o.vehicle || "", manager: o.manager || "",
     pickup: o.pickup || o.depart || null, pickupEstimated: !!o.pickupEstimated, lastVerif: o.lastVerif || null, lastCheckin: o.lastCheckin || null,
     lastContacted: o.lastContacted || null, status: o.status || "active", absentSince: o.absentSince || null, source: o.source || "",
+    agency: cleanAgency(o.agency),
     prevPlate: o.prevPlate || undefined
   };
 }
 
 
 
-export { ADDRESS, CYCLE_DAYS, SOON_DAYS, COOLDOWN_DAYS, DAY_MS, normText, nameTokens, nameKey, normPlate, fmtPlate, esc, firstName, PLACEHOLDER_NAMES, isPlaceholderName, normPhone, fmtPhone, waNumber, startOfDay, todayDate, toISO, parseISO, addDays, daysBetween, dayOf, MONTHS_FR, fmtDate, fmtDateFull, parseAnyDate, relTime, refDate, dueDate, dueStatus, daysToDue, contactedThisCycle, recentlyContacted, MESSAGE_TYPES, buildMessage, VEHICLE_BRANDS, VEHICLE_MODEL_HINTS, VEHICLE_KEEP_UPPER, detectBrandModel, PLATE_LINE, parseFoxBlocks, parseFoxTable, parseFoxText, finalizeFoxRows, parseCSV, headerIndex, foxRowsFromGrid, contactsFromGrid, contactsFromText, contactsFromVcf, isActive, buildNameIndex, tokensSubset, findDriver, sameVehicleText, reconcileFox, contactPhoneFor, pushLog, applyFox, reconcileContacts, applyContacts, mergeLegacyBackup, normalizeDriver };
+export { ADDRESS, CYCLE_DAYS, SOON_DAYS, COOLDOWN_DAYS, DAY_MS, normText, nameTokens, nameKey, normPlate, fmtPlate, esc, firstName, PLACEHOLDER_NAMES, isPlaceholderName, normPhone, fmtPhone, waNumber, startOfDay, todayDate, toISO, parseISO, addDays, daysBetween, dayOf, MONTHS_FR, fmtDate, fmtDateFull, parseAnyDate, relTime, cleanAgency, agencyLabel, refDate, dueDate, neverSent, dueStatus, daysToDue, contactedThisCycle, recentlyContacted, MESSAGE_TYPES, buildMessage, VEHICLE_BRANDS, VEHICLE_MODEL_HINTS, VEHICLE_KEEP_UPPER, detectBrandModel, PLATE_LINE, parseFoxBlocks, parseFoxTable, parseFoxText, finalizeFoxRows, parseCSV, headerIndex, foxRowsFromGrid, contactsFromGrid, contactsFromText, contactsFromVcf, isActive, buildNameIndex, tokensSubset, findDriver, sameVehicleText, reconcileFox, contactPhoneFor, pushLog, applyFox, reconcileContacts, applyContacts, mergeLegacyBackup, normalizeDriver };
