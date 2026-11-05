@@ -4,6 +4,7 @@ import { runContactsSync, runFoxSync } from "./sync.ts";
 import { sourceConfigured } from "./sheets.ts";
 import { continueAutoSending, dailyRun } from "./campaigns.ts";
 import { getSetting, setSetting } from "./settings.ts";
+import { saveDailySnapshot } from "./report.ts";
 
 const SYNC_EVERY_MS = Number(process.env.SYNC_EVERY_MINUTES || 15) * 60_000;
 const DAILY_HOUR_PARIS = Number(process.env.DAILY_HOUR || 8);
@@ -33,6 +34,7 @@ export async function dailyTick(now = new Date()) {
   const last = (await getSetting<any>("daily_state"))?.day;
   if (last === day) return { status: "already-done" };
   const out = await dailyRun();
+  try { await saveDailySnapshot(); } catch (e: any) { console.error("compte rendu :", e?.message || e); }
   await setSetting("daily_state", { day });
   return out;
 }
