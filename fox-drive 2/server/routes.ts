@@ -60,7 +60,7 @@ route("POST", "/api/drivers", "admin", async ({ body }) => {
   return await withState((S) => {
     const key = L.nameKey(name);
     if (S.drivers.some((d) => L.nameKey(d.name) === key && L.isActive(d))) bad("Un chauffeur actif porte déjà ce nom.", 409);
-    const d: any = { id: Math.max(0, ...S.drivers.map((x) => x.id)) + 1, name, phone, plate, vehicle: String(body.vehicle || "").trim(), manager: "", pickup: isoDay(body.pickup) || L.toISO(new Date()), pickupEstimated: !body.pickup, lastVerif: isoDay(body.lastVerif) ?? null, lastCheckin: null, lastContacted: null, status: "active", absentSince: null, source: "manuel", notes: "" };
+    const d: any = { id: Math.max(0, ...S.drivers.map((x) => x.id)) + 1, name, phone, plate, vehicle: String(body.vehicle || "").trim(), manager: "", pickup: isoDay(body.pickup) || L.toISO(new Date()), pickupEstimated: !body.pickup, lastVerif: isoDay(body.lastVerif) ?? null, lastCheckin: null, lastContacted: null, status: "active", absentSince: null, source: "manuel", notes: "", agency: L.cleanAgency(body.agency) };
     S.drivers.push(d);
     L.pushLog(S, "new", d, "Chauffeur ajouté à la main · " + L.fmtPlate(plate));
     return { driver: d };
@@ -77,6 +77,7 @@ route("PATCH", "/api/drivers/:id", "admin", async ({ params, body }) => {
       if (!raw) { if (d.phone) { notes.push("numéro supprimé"); d.phone = ""; } }
       else { const np = L.normPhone(raw); if (!np.ok) bad("Numéro de téléphone invalide."); if (np.phone !== d.phone) { L.pushLog(S, "phone", d, d.phone ? "Numéro modifié : " + L.fmtPhone(d.phone) + " → " + L.fmtPhone(np.phone) : "Numéro ajouté : " + L.fmtPhone(np.phone)); d.phone = np.phone; S.contacts[L.nameKey(d.name)] = { name: d.name, phone: np.phone }; } }
     }
+    if ("agency" in body) d.agency = L.cleanAgency(body.agency);
     if ("plate" in body) {
       const p = L.normPlate(body.plate);
       if (p !== d.plate) { d.prevPlate = d.plate || undefined; L.pushLog(S, "vehicle", d, (d.plate ? L.fmtPlate(d.plate) : "—") + " → " + (p ? L.fmtPlate(p) : "—") + " (modifié à la main)", { from: d.plate, to: p }); d.plate = p; }
