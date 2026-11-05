@@ -25,7 +25,7 @@ const API = {
 let S = null;           // vue de l'état serveur : drivers, contacts, log, imports, pending, config
 let ME = null;          // utilisateur connecté
 let sigPrev = "";
-const ui = { view: "dash", q: "", filter: "all", sort: "due", sel: false, ids: new Set(), vq: "", logFilter: "all", bulk: null, rev: null, folders: [], firstDash: true, busy: 0, chat: [], settings: null, campaigns: null, replies: null };
+const ui = { view: "dash", q: "", filter: "all", agencies: loadAgencies(), sort: "due", sel: false, ids: new Set(), vq: "", logFilter: "all", bulk: null, rev: null, folders: [], firstDash: true, busy: 0, chat: [], settings: null, campaigns: null, replies: null };
 const isAdmin = () => !ME || ME.role === "admin";
 const actives = () => S.drivers.filter(isActive);
 const byId = id => S.drivers.find(d => d.id === Number(id));
@@ -108,13 +108,14 @@ function badge(tone, label) { return '<span class="badge ' + tone + '"><i></i>' 
 
 function statusInfo(d) {
   const st = dueStatus(d), n = daysToDue(d);
+  if (neverSent(d)) return { key: "overdue", tone: "red", label: "Jamais vérifié" };
   if (st === "overdue") return { key: "overdue", tone: "red", label: "En retard · " + (-n) + " j" };
   if (st === "soon") return { key: "soon", tone: "amber", label: n === 0 ? "Aujourd'hui" : "Dans " + n + " j" };
   if (st === "ok") return { key: "ok", tone: "green", label: "À jour" };
   return { key: "unknown", tone: "", label: "Jamais vérifié" };
 }
 function dueText(d) {
-  const due = dueDate(d); if (!due) return { main: "—", sub: "" };
+  const due = dueDate(d); if (!due || neverSent(d)) return { main: "—", sub: neverSent(d) ? "rien reçu à ce jour" : "" };
   const n = daysToDue(d);
   return { main: fmtDate(due), sub: n < 0 ? "retard de " + (-n) + " j" : n === 0 ? "aujourd'hui" : "dans " + n + " j" };
 }
@@ -123,12 +124,12 @@ function dueText(d) {
 /* ---------- groupes pour le tableau de bord ---------- */
 function computeGroups() {
   const A = actives();
-  const byDue = (a, b) => (dueDate(a) - dueDate(b));
+  const byDue = (a, b) => (neverSent(b) - neverSent(a)) || ((dueDate(a) || 0) - (dueDate(b) || 0)) || a.name.localeCompare(b.name, "fr");
   const G = {
     overdue: A.filter(d => dueStatus(d) === "overdue").sort(byDue),
     soon: A.filter(d => dueStatus(d) === "soon").sort(byDue),
     ok: A.filter(d => dueStatus(d) === "ok").sort(byDue),
-    unknown: A.filter(d => dueStatus(d) === "unknown").sort((a, b) => a.name.localeCompare(b.name, "fr")),
+    unknown: A.filter(d => neverSent(d)).sort((a, b) => a.name.localeCompare(b.name, "fr")),
     nophone: A.filter(d => !d.phone).sort((a, b) => a.name.localeCompare(b.name, "fr")),
     pending: S.drivers.filter(d => d.status === "archived").sort((a, b) => String(b.absentSince || "").localeCompare(String(a.absentSince || ""))),
     news: []
@@ -267,7 +268,7 @@ function buildFolders(G) {
   const bulkOf = (list) => () => { const ids = list.filter(d => d.phone).map(d => d.id); if (!ids.length) return toast("Aucun numéro dans ce dossier.", true); openChooser(null, ids); };
   const defs = [
     { label: "À relancer", count: G.overdue.length, meta: nb(G.overdue.length), art: "ember", seed: 11, tone: "light", filter: "overdue",
-      files: top(G.overdue).map(d => file(d, "Retard " + (-daysToDue(d)) + " j", "red")), menu: [{ label: "Voir la liste complète", onSelect: () => go("drivers", { filter: "overdue" }) }, { label: "Message groupé (avec numéro)", onSelect: bulkOf(G.overdue) }] },
+      files: top(G.overdue).map(d => file(d, neverSent(d) ? "Jamais vérifié" : "Retard " + (-daysToDue(d)) + " j", "red")), menu: [{ label: "Voir la liste complète", onSelect: () => go("drivers", { filter: "overdue" }) }, { label: "Message groupé (avec numéro)", onSelect: bulkOf(G.overdue) }] },
     { label: "Cette semaine", count: G.soon.length, meta: nb(G.soon.length), art: "dusk", seed: 5, tone: "light", filter: "soon",
       files: top(G.soon).map(d => file(d, daysToDue(d) === 0 ? "Aujourd'hui" : "Dans " + daysToDue(d) + " j", "amber")), menu: [{ label: "Voir la liste complète", onSelect: () => go("drivers", { filter: "soon" }) }, { label: "Message groupé (avec numéro)", onSelect: bulkOf(G.soon) }] },
     { label: "À jour", count: G.ok.length, meta: nb(G.ok.length), art: "verdant", seed: 7, tone: "light", filter: "ok",
@@ -305,10 +306,15 @@ const FILTERS = [
   ["all", "Tous"], ["overdue", "À relancer"], ["soon", "Cette semaine"], ["ok", "À jour"], ["unknown", "Jamais vérifié"],
   ["nophone", "Sans numéro"], ["notcontacted", "Non contactés"], ["archived", "Partis / archivés"],
 ];
-function filterList(f) {
+function loadAgencies() { try { return new Set(JSON.parse(localStorage.getItem("fd_agencies") || "[]")); } catch (e) { return new Set(); } }
+function saveAgencies() { try { localStorage.setItem("fd_agencies", JSON.stringify([...ui.agencies])); } catch (e) { /* stockage indisponible : le filtre reste valable pour cette visite */ } }
+const inAgencies = d => !ui.agencies.size || ui.agencies.has(d.agency || "");
+function filterList(f) { return filterListAll(f).filter(inAgencies); }
+function filterListAll(f) {
   const A = actives();
   switch (f) {
-    case "overdue": case "soon": case "ok": case "unknown": return A.filter(d => dueStatus(d) === f);
+    case "unknown": return A.filter(d => neverSent(d));
+    case "overdue": case "soon": case "ok": return A.filter(d => dueStatus(d) === f);
     case "nophone": return A.filter(d => !d.phone);
     case "notcontacted": return A.filter(d => !contactedThisCycle(d) && dueStatus(d) !== "ok");
     case "pending": return S.drivers.filter(d => d.status === "pending");
@@ -320,7 +326,8 @@ function sortList(list, mode) {
   const l = list.slice();
   if (mode === "name") return l.sort((a, b) => a.name.localeCompare(b.name, "fr"));
   if (mode === "plate") return l.sort((a, b) => normPlate(a.plate).localeCompare(normPlate(b.plate)));
-  return l.sort((a, b) => {   // échéance : les plus en retard d'abord, les inconnus en dernier
+  return l.sort((a, b) => {   // jamais vérifiés d'abord, puis les plus en retard, les inconnus en dernier
+    if (neverSent(a) !== neverSent(b)) return neverSent(a) ? -1 : 1;
     const da = dueDate(a), db = dueDate(b);
     if (!da && !db) return a.name.localeCompare(b.name, "fr");
     if (!da) return 1; if (!db) return -1;
@@ -350,7 +357,7 @@ function rowHtml(d, opts) {
   const status = pend ? badge("amber", "Départ à confirmer") : arch ? badge("", "Archivé") : badge(si.tone, si.label);
   return '<div class="row' + (sel ? " sel-on" : "") + (urgent ? " urgent" : "") + (pend ? " wide" : "") + (arch ? " narrow" : "") + '" data-id="' + d.id + '">' +
     (sel ? '<input class="cbx" type="checkbox" data-chg="sel" data-id="' + d.id + '"' + (ui.ids.has(d.id) ? " checked" : "") + ' aria-label="Sélectionner ' + esc(d.name) + '">' : "") +
-    '<button class="row-main" data-act="open" data-id="' + d.id + '"><b>' + esc(d.name) + "</b><span>" + esc(d.vehicle || "—") + (d.manager ? " · " + esc(d.manager) : "") + "</span></button>" +
+    '<button class="row-main" data-act="open" data-id="' + d.id + '"><b>' + esc(d.name) + "</b><span>" + esc(d.vehicle || "—") + (d.agency ? " · " + esc(agencyLabel(d.agency)) : "") + (d.manager ? " · " + esc(d.manager) : "") + "</span></button>" +
     '<div class="cell c-plate mono">' + esc(fmtPlate(d.plate) || "—") + "</div>" +
     '<div class="cell c-due"><span class="lbl">Échéance · </span>' + esc(du.main) + (du.sub ? "<small>" + du.sub + "</small>" : "") + "</div>" +
     '<div class="cell c-badge">' + status + "</div>" +
@@ -359,10 +366,22 @@ function rowHtml(d, opts) {
     '<div class="acts">' + acts + "</div></div>";
 }
 
+function renderAgencyChips() {
+  const box = $("#agency-chips"); if (!box) return;
+  const n = {};
+  actives().forEach(d => { const a = d.agency || ""; n[a] = (n[a] || 0) + 1; });
+  const names = Object.keys(n).sort((a, b) => (a === "") - (b === "") || a.localeCompare(b, "fr"));
+  [...ui.agencies].forEach(a => { if (!(a in n)) ui.agencies.delete(a); });   // une agence qui a disparu ne doit pas masquer toute la liste
+  if (!names.some(a => a !== "")) { box.innerHTML = ""; return; }
+  box.innerHTML = '<span class="small muted" style="align-self:center;margin-right:4px">Agence</span>' +
+    '<button class="chipbtn" aria-pressed="' + (ui.agencies.size === 0) + '" data-act="agency-all">Toutes</button>' +
+    names.map(a => '<button class="chipbtn" aria-pressed="' + ui.agencies.has(a) + '" data-act="agency" data-a="' + esc(a) + '">' + esc(agencyLabel(a)) + ' <span class="n">' + n[a] + "</span></button>").join("");
+}
 function renderDrivers() {
   const counts = {};
   FILTERS.forEach(([k]) => { counts[k] = filterList(k).length; });
   $("#chips").innerHTML = FILTERS.filter(([k]) => k !== "archived" || counts[k] > 0).map(([k, l]) => '<button class="chipbtn" aria-pressed="' + (ui.filter === k) + '" data-act="filter" data-f="' + k + '">' + l + ' <span class="n">' + counts[k] + "</span></button>").join("");
+  renderAgencyChips();
   if ($("#q").value !== ui.q) $("#q").value = ui.q;
   $("#sort").value = ui.sort;
   const bs = $("#btn-sel"); bs.innerHTML = I.check + "<span>" + (ui.sel ? "Terminer" : "Sélection") + "</span>";
@@ -1162,6 +1181,8 @@ const ACT = {
   close: () => closeModal(),
   open: t => openDriver(Number(t.dataset.id), t.dataset.focus),
   filter: t => { ui.filter = t.dataset.f; renderDrivers(); },
+  agency: t => { const a = t.dataset.a; if (ui.agencies.has(a)) ui.agencies.delete(a); else ui.agencies.add(a); saveAgencies(); renderDrivers(); },
+  "agency-all": () => { ui.agencies.clear(); saveAgencies(); renderDrivers(); },
   "log-filter": t => { ui.logFilter = t.dataset.f; renderLog(); },
   chooser: t => openChooser(Number(t.dataset.id)),
   received: t => { markReceived(Number(t.dataset.id)); if (t.dataset.reopen) closeModal(); },
