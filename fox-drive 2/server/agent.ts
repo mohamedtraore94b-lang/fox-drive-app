@@ -63,14 +63,15 @@ async function runTool(name: string, input: any, ctx: Ctx): Promise<any> {
     const t = relanceTargets(drivers, now);
     const [p] = await q("SELECT count(*)::int AS n FROM imports WHERE status = 'pending'");
     const st: any = await getSetting("sync_state");
-    return { actifs: A.length, en_retard: by("overdue"), cette_semaine: by("soon"), a_jour: by("ok"), jamais_verifies: by("unknown"), sans_numero: A.filter((d) => !L.normPhone(d.phone).ok).length, a_relancer_maintenant: t.ready.length, deja_contactes_recemment: t.recent, archives: drivers.filter((d) => d.status === "archived").length, imports_en_attente: p.n, derniere_synchro: st.lastOkAt };
+    return { actifs: A.length, en_retard: by("overdue"), cette_semaine: by("soon"), a_jour: by("ok"), jamais_verifies: A.filter((d) => L.neverSent(d)).length, sans_numero: A.filter((d) => !L.normPhone(d.phone).ok).length, a_relancer_maintenant: t.ready.length, deja_contactes_recemment: t.recent, archives: drivers.filter((d) => d.status === "archived").length, imports_en_attente: p.n, derniere_synchro: st.lastOkAt };
   }
   if (name === "list_drivers") {
     const drivers = await loadDrivers();
     const A = drivers.filter(L.isActive);
     let list: any[];
     switch (input.filter) {
-      case "overdue": case "soon": case "ok": case "unknown": list = A.filter((d) => L.dueStatus(d, now) === input.filter); break;
+      case "unknown": list = A.filter((d) => L.neverSent(d)); break;
+      case "overdue": case "soon": case "ok": list = A.filter((d) => L.dueStatus(d, now) === input.filter); break;
       case "no_phone": list = A.filter((d) => !L.normPhone(d.phone).ok); break;
       case "to_relance": list = relanceTargets(drivers, now).ready; break;
       case "recently_contacted": list = A.filter((d) => L.recentlyContacted(d, now)); break;
