@@ -9,7 +9,7 @@ export const DRIVER_SELECT = `id, name, phone, plate, vehicle, manager,
   ${D("pickup")} AS "pickup", pickup_estimated AS "pickupEstimated",
   ${D("last_verif")} AS "lastVerif", ${D("last_checkin")} AS "lastCheckin",
   ${TS("last_contacted")} AS "lastContacted", status, ${D("absent_since")} AS "absentSince",
-  prev_plate AS "prevPlate", source, notes`;
+  prev_plate AS "prevPlate", source, notes, agency`;
 
 export type State = {
   drivers: any[]; contacts: Record<string, { name: string; phone: string }>;
@@ -30,7 +30,7 @@ function clean(d: any) {
     id: d.id, name: d.name, phone: d.phone || "", plate: d.plate || "", vehicle: d.vehicle || "", manager: d.manager || "",
     pickup: dateOnly(d.pickup), pickupEstimated: !!d.pickupEstimated, lastVerif: dateOnly(d.lastVerif), lastCheckin: dateOnly(d.lastCheckin),
     lastContacted: d.lastContacted || null, status: d.status || "active", absentSince: dateOnly(d.absentSince),
-    prevPlate: d.prevPlate || null, source: d.source || "", notes: d.notes || "",
+    prevPlate: d.prevPlate || null, source: d.source || "", notes: d.notes || "", agency: d.agency || "",
   };
 }
 
@@ -96,15 +96,15 @@ export async function withState<T>(fn: (S: State) => Promise<T> | T): Promise<T>
       if (beforeD.get(d.id) === js) continue;
       await c.query(
         `INSERT INTO drivers (id, name, name_key, phone, plate, vehicle, manager, pickup, pickup_estimated, last_verif, last_checkin,
-           last_contacted, status, absent_since, prev_plate, source, notes, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, now())
+           last_contacted, status, absent_since, prev_plate, source, notes, agency, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, now())
          ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, name_key=EXCLUDED.name_key, phone=EXCLUDED.phone, plate=EXCLUDED.plate,
            vehicle=EXCLUDED.vehicle, manager=EXCLUDED.manager, pickup=EXCLUDED.pickup, pickup_estimated=EXCLUDED.pickup_estimated,
            last_verif=EXCLUDED.last_verif, last_checkin=EXCLUDED.last_checkin, last_contacted=EXCLUDED.last_contacted,
            status=EXCLUDED.status, absent_since=EXCLUDED.absent_since, prev_plate=EXCLUDED.prev_plate, source=EXCLUDED.source,
-           notes=EXCLUDED.notes, updated_at=now()`,
+           notes=EXCLUDED.notes, agency=EXCLUDED.agency, updated_at=now()`,
         [cd.id, cd.name, L.nameKey(cd.name), cd.phone, cd.plate, cd.vehicle, cd.manager, cd.pickup, cd.pickupEstimated, cd.lastVerif,
-          cd.lastCheckin, cd.lastContacted, cd.status, cd.absentSince, cd.prevPlate, cd.source, cd.notes]);
+          cd.lastCheckin, cd.lastContacted, cd.status, cd.absentSince, cd.prevPlate, cd.source, cd.notes, cd.agency]);
     }
     const present = new Set(S.drivers.map((d) => d.id));
     for (const id of beforeD.keys()) if (!present.has(id)) await c.query("DELETE FROM drivers WHERE id = $1", [id]);
