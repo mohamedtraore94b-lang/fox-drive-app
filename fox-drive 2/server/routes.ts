@@ -9,6 +9,7 @@ import { DEFAULTS, getSetting, publicSettings, setSetting } from "./settings.ts"
 import { applyContactsImport, applyFoxImport, previewContacts, previewFox, rejectImport, runContactsSync, runFoxSync } from "./sync.ts";
 import { fetchFoxFromSource, parseFoxGrid } from "./sheets.ts";
 import { TEMPLATE_BODIES, sendToDriver, waConfig } from "./whatsapp.ts";
+import { buildReport, listReports } from "./report.ts";
 import { cancelCampaign, createCampaign, getCampaign, listCampaigns, messagesFor, recentReplies, relanceTargets, sendCampaignBatch, setItemStatus } from "./campaigns.ts";
 import { agentConfig, callClaude, chat } from "./agent.ts";
 
@@ -268,6 +269,7 @@ route("PATCH", "/api/campaigns/:id/items/:driverId", "admin", async ({ params, b
   await setItemStatus(Number(params.id), Number(params.driverId), body.status === "pending" ? "pending" : "skipped");
   return { campaign: await getCampaign(Number(params.id)) };
 });
+route("GET", "/api/report", "user", async ({ url }) => ({ report: await buildReport(Number(url.searchParams.get("hours")) || 24), history: await listReports(14) }));
 route("GET", "/api/replies", "user", async () => ({ replies: await recentReplies(40) }));
 route("GET", "/api/relance-targets", "user", async () => {
   const t = relanceTargets(await loadDrivers());
