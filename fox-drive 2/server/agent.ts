@@ -6,6 +6,7 @@ import { loadDrivers, loadEvents, withState } from "./repo.ts";
 import { getSetting } from "./settings.ts";
 import { createCampaign, messagesFor, recentReplies, relanceTargets, AUTO_TYPES } from "./campaigns.ts";
 import { runFoxSync } from "./sync.ts";
+import { buildReport } from "./report.ts";
 
 const API = "https://api.anthropic.com/v1/messages";
 const MAX_ROUNDS = 8;
@@ -24,6 +25,7 @@ const TOOLS = [
     driver_ids: { type: "array", items: { type: "integer" } }, title: { type: "string" } }, required: ["type"] } },
   { name: "add_note", description: "Ajoute une note libre sur la fiche d'un chauffeur.", input_schema: { type: "object", properties: { driver_id: { type: "integer" }, note: { type: "string" } }, required: ["driver_id", "note"] } },
   { name: "record_verification_received", description: "Enregistre que le chauffeur a envoyé sa vérification (photos + compteur) aujourd'hui : son cycle de 30 jours repart d'aujourd'hui. À utiliser seulement si l'utilisateur l'affirme.", input_schema: { type: "object", properties: { driver_id: { type: "integer" } }, required: ["driver_id"] } },
+  { name: "daily_report", description: "Compte rendu : qui a envoyé sa vérification ou des photos sur les dernières heures (24 par défaut), qui reste à relancer, qui a déjà été relancé et qui n'a pas de numéro.", input_schema: { type: "object", properties: { hours: { type: "integer", description: "Période en heures (24 par défaut, 168 au maximum pour une semaine)" } } } },
   { name: "sync_now", description: "Relit tout de suite la feuille Google source et met la flotte à jour (nouveaux chauffeurs, changements de véhicule, départs).", input_schema: { type: "object", properties: {} } },
 ];
 
@@ -95,6 +97,7 @@ async function runTool(name: string, input: any, ctx: Ctx): Promise<any> {
     if (!d) return { error: "Chauffeur introuvable." };
     return { ...slim(d, now), phone: d.phone ? L.fmtPhone(d.phone) : null, manager: d.manager, notes: d.notes, events: (await loadEvents(12, d.id)).map((e: any) => e.ts.slice(0, 10) + " " + e.text), messages: (await messagesFor(d.id, 8)).map((m: any) => m.ts.slice(0, 10) + " " + (m.direction === "in" ? "← " : "→ ") + m.body.slice(0, 120)) };
   }
+  if (name === "daily_report") { const r: any = await buildReport(Number(input.hours) || 24); return { ...r, toRelance: r.toRelance.slice(0, 80), noPhone: r.noPhone.slice(0, 40), waiting: r.waiting.slice(0, 40) }; }
   if (name === "recent_replies") return { replies: (await recentReplies(Math.min(Number(input.limit) || 15, 40))).map((r: any) => ({ at: r.ts, driver_id: r.driverId, name: r.name || r.phone, text: r.body })) };
   if (name === "prepare_campaign") {
     if (!AUTO_TYPES.includes(input.type)) return { error: "Type non autorisé pour l'agent." };
