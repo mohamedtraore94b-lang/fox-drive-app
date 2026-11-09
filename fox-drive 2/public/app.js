@@ -493,9 +493,12 @@ async function sendMessage(id, type) {
     return true;
   }
   // WhatsApp Business pas relié : on ouvre WhatsApp avec le message prêt, et on note le contact
-  const msg = encodeURIComponent(buildMessage(d, type));
+  // lien https://wa.me : marche partout (ouvre l'appli WhatsApp si elle est installée, sinon WhatsApp Web).
+  // L'ouverture se fait AVANT l'appel réseau, sinon le navigateur bloque la fenêtre (clic trop ancien).
+  const url = "https://wa.me/" + waNumber(d.phone) + "?text=" + encodeURIComponent(buildMessage(d, type));
+  const w = window.open(url, "_blank", "noopener");
+  if (!w) toast("Le navigateur a bloqué l'ouverture de WhatsApp : autorise les fenêtres pop-up pour ce site.", true);
   try { await API.post("/drivers/" + id + "/action", { action: "contacted", kind: type }); } catch (e) { /* le message part quand même */ }
-  window.location.href = "whatsapp://send?phone=" + waNumber(d.phone) + "&text=" + msg;
   setTimeout(() => reload({ force: true }), 800);
   return true;
 }
