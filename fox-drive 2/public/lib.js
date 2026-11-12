@@ -126,11 +126,19 @@ function refDate(d) {
   return c.reduce((a, b) => (a > b ? a : b));
 }
 function dueDate(d) { const r = refDate(d); return r ? addDays(r, CYCLE_DAYS) : null; }
-/* jamais rien envoyé : ni vérification enregistrée, ni photos reçues -> toujours à relancer, même si la date d'échéance est loin */
-function neverSent(d) { return !d.lastVerif && !d.lastCheckin; }
+/* prise du véhicule récente (moins de 30 jours) : le véhicule vient d'être remis, la vérification n'est due qu'un mois plus tard.
+   Une date seulement estimée (premier import) ne compte pas : elle ne prouve pas que le chauffeur vient de le prendre. */
+function recentPickup(d, now) {
+  if (!d.pickup || d.pickupEstimated) return false;
+  const n = daysBetween(dayOf(d.pickup), now || todayDate());
+  return n >= 0 && n < CYCLE_DAYS;
+}
+/* jamais rien envoyé : ni vérification enregistrée, ni photos reçues -> toujours à relancer, même si la date d'échéance est loin,
+   sauf si le chauffeur a pris son véhicule il y a moins d'un mois (il est alors à jour) */
+function neverSent(d, now) { return !d.lastVerif && !d.lastCheckin && !recentPickup(d, now); }
 /* 'overdue' | 'soon' | 'ok' | 'unknown' */
 function dueStatus(d, now) {
-  if (neverSent(d)) return "overdue";
+  if (neverSent(d, now)) return "overdue";
   const due = dueDate(d);
   if (!due) return "unknown";
   const diff = daysBetween(now || todayDate(), due);
@@ -157,7 +165,13 @@ const MESSAGE_TYPES = [
   { key: "revision", label: "Révision", desc: "Prévenir d'une révision à prévoir et proposer un rendez-vous" },
   { key: "controle", label: "Contrôle", desc: "Convoquer le chauffeur pour un contrôle du véhicule" },
 ];
-function buildMessage(d, type) {
+/* Choisy : pas de signature « FOX DRIVE » */
+function signedOff(d, text) {
+  if (cleanAgency(d.agency) !== "CHOISY") return text;
+  return text.replace(/,\nFOX DRIVE$/, ".").replace(/\nFOX DRIVE$/, "");
+}
+function buildMessage(d, type) { return signedOff(d, buildMessageBase(d, type)); }
+function buildMessageBase(d, type) {
   const fn = firstName(d.name);
   const pl = d.plate ? " (" + fmtPlate(d.plate) + ")" : "";
   if (type === "relance_ferme")
@@ -677,4 +691,4 @@ function normalizeDriver(o) {
 
 
 
-export { ADDRESS, CYCLE_DAYS, SOON_DAYS, COOLDOWN_DAYS, DAY_MS, normText, nameTokens, nameKey, normPlate, fmtPlate, esc, firstName, PLACEHOLDER_NAMES, isPlaceholderName, normPhone, fmtPhone, waNumber, startOfDay, todayDate, toISO, parseISO, addDays, daysBetween, dayOf, MONTHS_FR, fmtDate, fmtDateFull, parseAnyDate, relTime, cleanAgency, agencyLabel, refDate, dueDate, neverSent, dueStatus, daysToDue, contactedThisCycle, recentlyContacted, MESSAGE_TYPES, buildMessage, VEHICLE_BRANDS, VEHICLE_MODEL_HINTS, VEHICLE_KEEP_UPPER, detectBrandModel, PLATE_LINE, parseFoxBlocks, parseFoxTable, parseFoxText, finalizeFoxRows, parseCSV, headerIndex, foxRowsFromGrid, contactsFromGrid, contactsFromText, contactsFromVcf, isActive, buildNameIndex, tokensSubset, findDriver, sameVehicleText, reconcileFox, contactPhoneFor, pushLog, applyFox, reconcileContacts, applyContacts, mergeLegacyBackup, normalizeDriver };
+export { ADDRESS, CYCLE_DAYS, SOON_DAYS, COOLDOWN_DAYS, DAY_MS, normText, nameTokens, nameKey, normPlate, fmtPlate, esc, firstName, PLACEHOLDER_NAMES, isPlaceholderName, normPhone, fmtPhone, waNumber, startOfDay, todayDate, toISO, parseISO, addDays, daysBetween, dayOf, MONTHS_FR, fmtDate, fmtDateFull, parseAnyDate, relTime, cleanAgency, agencyLabel, refDate, dueDate, neverSent, recentPickup, dueStatus, daysToDue, contactedThisCycle, recentlyContacted, MESSAGE_TYPES, buildMessage, VEHICLE_BRANDS, VEHICLE_MODEL_HINTS, VEHICLE_KEEP_UPPER, detectBrandModel, PLATE_LINE, parseFoxBlocks, parseFoxTable, parseFoxText, finalizeFoxRows, parseCSV, headerIndex, foxRowsFromGrid, contactsFromGrid, contactsFromText, contactsFromVcf, isActive, buildNameIndex, tokensSubset, findDriver, sameVehicleText, reconcileFox, contactPhoneFor, pushLog, applyFox, reconcileContacts, applyContacts, mergeLegacyBackup, normalizeDriver };
